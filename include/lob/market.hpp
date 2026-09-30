@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <cstddef>
 #include <optional>
 #include <vector>
@@ -81,6 +82,32 @@ public:
         return add(book, new_id, side, price, qty);
     }
 
+    // Trades up to qty against the resting orders on one side: best price
+    // first, oldest order first within a price, and never through the limit.
+    // Calls on_fill(resting id, price, quantity) for each order it touches
+    // and returns the total filled.
+    template <class OnFill>
+    Qty match(std::uint16_t book, Side resting, Price limit, Qty qty, OnFill&& on_fill) {
+        Ladder& ladder = books_[book].side(resting);
+        const std::uint32_t worst = key(resting, limit);
+        Qty filled = 0;
+        while (filled < qty && !ladder.empty() && ladder.back().key >= worst) {
+            const std::uint32_t l = ladder.back().level;
+            const std::uint32_t o = levels_[l].head;
+            Order& order = orders_[o];
+            const Qty take = std::min(qty - filled, order.qty);
+            on_fill(order.id, levels_[l].price, take);
+            filled += take;
+            if (take == order.qty) {
+                unlink(o);  // drops the level too if this was its last order
+            } else {
+                order.qty -= take;
+                levels_[l].total -= take;
+            }
+        }
+        return filled;
+    }
+
     // Hint that this id is about to be added or looked up.
     void prefetch(OrderId id) const { ids_.prefetch(id); }
 
@@ -125,6 +152,20 @@ public:
         const std::uint32_t o = ids_.find(id);
         if (o == kNil) return std::nullopt;
         return orders_[o].qty;
+    }
+
+    struct OrderView {
+        std::uint16_t book;
+        Side side;
+        Price price;
+        Qty qty;
+    };
+
+    std::optional<OrderView> order(OrderId id) const {
+        const std::uint32_t o = ids_.find(id);
+        if (o == kNil) return std::nullopt;
+        const Level& level = levels_[orders_[o].level];
+        return OrderView{level.book, level.side, level.price, orders_[o].qty};
     }
 
     std::size_t depth(std::uint16_t book, Side side) const { return books_[book].side(side).size(); }
