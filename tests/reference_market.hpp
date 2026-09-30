@@ -19,15 +19,19 @@ class Market {
 public:
     explicit Market(std::size_t instruments) : books_(instruments) {}
 
-    bool add(std::uint16_t book, OrderId id, Side side, Price price, Qty qty) {
+    bool add(std::uint16_t book, OrderId id, Side side, Price price, Qty qty, Rank rank = Rank::Arrival) {
         auto [it, inserted] = orders_.try_emplace(id);
         if (!inserted) return false;
 
         Level& level = level_for(books_[book], side, price);
-        level.queue.push_back(id);
+        auto pos = level.queue.end();
+        if (rank == Rank::Id) {
+            while (pos != level.queue.begin() && *std::prev(pos) > id) --pos;
+        }
+        pos = level.queue.insert(pos, id);
         level.total += qty;
 
-        it->second = Order{qty, price, side, book, std::prev(level.queue.end())};
+        it->second = Order{qty, price, side, book, pos};
         return true;
     }
 
@@ -55,13 +59,13 @@ public:
 
     // The replacement gets a new id and goes to the back of the queue at its
     // new price, same side and instrument as the order it replaces.
-    bool replace(OrderId old_id, OrderId new_id, Price price, Qty qty) {
+    bool replace(OrderId old_id, OrderId new_id, Price price, Qty qty, Rank rank = Rank::Arrival) {
         auto it = orders_.find(old_id);
         if (it == orders_.end()) return false;
         const Side side = it->second.side;
         const std::uint16_t book = it->second.book;
         unlink(it);
-        return add(book, new_id, side, price, qty);
+        return add(book, new_id, side, price, qty, rank);
     }
 
     std::optional<Quote> best(std::uint16_t book, Side side) const {

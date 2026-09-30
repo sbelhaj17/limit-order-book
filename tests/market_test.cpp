@@ -80,6 +80,42 @@ TYPED_TEST(MarketTest, QueueListsOrdersInPriority) {
     EXPECT_TRUE(m.queue(kBook, Side::Buy, 10000).empty());
 }
 
+TYPED_TEST(MarketTest, RankByIdSlotsAnOrderAmongItsNeighbours) {
+    TypeParam m(1);
+    m.add(kBook, 50, Side::Buy, 10000, 100);
+    m.add(kBook, 90, Side::Buy, 10000, 100);
+
+    m.add(kBook, 70, Side::Buy, 10000, 100, Rank::Id);
+    EXPECT_EQ(m.queue(kBook, Side::Buy, 10000), (std::vector<OrderId>{50, 70, 90}));
+
+    m.add(kBook, 10, Side::Buy, 10000, 100, Rank::Id);  // older than everything
+    EXPECT_EQ(m.queue(kBook, Side::Buy, 10000), (std::vector<OrderId>{10, 50, 70, 90}));
+    EXPECT_TRUE(m.is_next_to_trade(10));
+
+    m.add(kBook, 99, Side::Buy, 10000, 100, Rank::Id);  // newer than everything
+    EXPECT_EQ(m.queue(kBook, Side::Buy, 10000), (std::vector<OrderId>{10, 50, 70, 90, 99}));
+
+    // by arrival the id does not matter
+    m.add(kBook, 5, Side::Buy, 10000, 100);
+    EXPECT_EQ(m.queue(kBook, Side::Buy, 10000).back(), 5u);
+    EXPECT_EQ(m.best(kBook, Side::Buy)->qty, 600u);
+
+    // taking orders out from the front, middle and back leaves the rest in order
+    m.remove(10);
+    m.remove(70);
+    m.remove(5);
+    EXPECT_EQ(m.queue(kBook, Side::Buy, 10000), (std::vector<OrderId>{50, 90, 99}));
+}
+
+TYPED_TEST(MarketTest, ReplaceCanRankById) {
+    TypeParam m(1);
+    m.add(kBook, 20, Side::Sell, 10000, 100);
+    m.add(kBook, 40, Side::Sell, 10000, 100);
+    m.add(kBook, 30, Side::Sell, 10010, 100);
+    ASSERT_TRUE(m.replace(30, 35, 10000, 100, Rank::Id));
+    EXPECT_EQ(m.queue(kBook, Side::Sell, 10000), (std::vector<OrderId>{20, 35, 40}));
+}
+
 TYPED_TEST(MarketTest, OnlyTheBestPriceIsNextToTrade) {
     TypeParam m(1);
     m.add(kBook, 1, Side::Sell, 10010, 100);

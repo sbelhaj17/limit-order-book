@@ -40,12 +40,23 @@ protected:
     void step() {
         const std::uint32_t roll = uniform(0, 99);
         if (live_.empty() || roll < 45) {
-            const OrderId id = next_id_++;
+            // Now and then set an id aside and use it later, the way an order
+            // entered before the open shows up late with an old id.
+            if (uniform(0, 9) == 0) held_.push_back(next_id_++);
+            const bool late = !held_.empty() && uniform(0, 5) == 0;
+            OrderId id;
+            if (late) {
+                id = held_.back();
+                held_.pop_back();
+            } else {
+                id = next_id_++;
+            }
+            const Rank rank = late || uniform(0, 2) == 0 ? Rank::Id : Rank::Arrival;
             const auto book = static_cast<std::uint16_t>(uniform(0, kBooks - 1));
             const Side side = uniform(0, 1) ? Side::Buy : Side::Sell;
             const Price price = random_price();
             const Qty qty = uniform(1, 500);
-            ASSERT_EQ(fast_.add(book, id, side, price, qty), slow_.add(book, id, side, price, qty));
+            ASSERT_EQ(fast_.add(book, id, side, price, qty, rank), slow_.add(book, id, side, price, qty, rank));
             live_.push_back(id);
         } else if (roll < 65) {
             const OrderId id = pick_live();
@@ -62,7 +73,8 @@ protected:
             const OrderId new_id = next_id_++;
             const Price price = random_price();
             const Qty qty = uniform(1, 500);
-            ASSERT_EQ(fast_.replace(old_id, new_id, price, qty), slow_.replace(old_id, new_id, price, qty));
+            const Rank rank = uniform(0, 1) ? Rank::Id : Rank::Arrival;
+            ASSERT_EQ(fast_.replace(old_id, new_id, price, qty, rank), slow_.replace(old_id, new_id, price, qty, rank));
             forget(old_id);
             live_.push_back(new_id);
         } else {
@@ -96,6 +108,7 @@ protected:
     reference::Market slow_;
     std::mt19937_64 rng_;
     std::vector<OrderId> live_;
+    std::vector<OrderId> held_;
     OrderId next_id_ = 1;
 };
 

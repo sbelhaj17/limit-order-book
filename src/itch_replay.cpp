@@ -92,7 +92,7 @@ public:
     void on_add(const itch::AddOrder& m) {
         ++n.adds;
         maybe_snapshot(m.timestamp);
-        if (!market_.add(m.locate, m.ref, m.side, m.price, m.shares)) ++unknown_refs;
+        if (!market_.add(m.locate, m.ref, m.side, m.price, m.shares, Rank::Id)) ++unknown_refs;
         peak_live = std::max<std::uint64_t>(peak_live, market_.live_orders());
     }
 
@@ -121,7 +121,7 @@ public:
     void on_replace(const itch::OrderReplace& m) {
         ++n.replaces;
         maybe_snapshot(m.timestamp);
-        if (!market_.replace(m.old_ref, m.new_ref, m.price, m.shares)) ++unknown_refs;
+        if (!market_.replace(m.old_ref, m.new_ref, m.price, m.shares, Rank::Id)) ++unknown_refs;
     }
 
     void on_trade(const itch::Trade&) { ++n.hidden_trades; }

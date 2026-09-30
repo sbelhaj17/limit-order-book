@@ -25,24 +25,42 @@ public:
     explicit Market(std::size_t instruments, std::size_t expected_orders = 1 << 20)
         : books_(instruments), orders_(expected_orders), levels_(expected_orders / 8), ids_(expected_orders) {}
 
-    bool add(std::uint16_t book, OrderId id, Side side, Price price, Qty qty) {
+    // Rank::Id exists for market data. NASDAQ numbers orders as it receives
+    // them and ranks them in that order, but an order entered before the open
+    // only shows up in the feed at 9:30, after later orders that were already
+    // on the book. Queueing by id instead of by arrival puts it where the
+    // exchange has it. For everything else the two rules give the same queue.
+    bool add(std::uint16_t book, OrderId id, Side side, Price price, Qty qty, Rank rank = Rank::Arrival) {
         const std::uint32_t o = orders_.alloc();
         if (!ids_.insert(id, o)) {
             orders_.release(o);
             return false;
         }
         const std::uint32_t l = level_for(book, side, price);
-
         Level& level = levels_[l];
+
+        // The neighbours this order goes between; kNil means the end of the queue.
+        std::uint32_t before = level.tail;
+        std::uint32_t after = kNil;
+        if (rank == Rank::Id) {
+            // Nearly always the tail already has a smaller id and this loop
+            // does not run. When an old id arrives late, walk back to its place.
+            while (before != kNil && orders_[before].id > id) {
+                after = before;
+                before = orders_[before].prev;
+            }
+        }
+
         Order& order = orders_[o];
         order.id = id;
         order.qty = qty;
         order.level = l;
-        order.next = kNil;
-        order.prev = level.tail;
-        if (level.tail != kNil) orders_[level.tail].next = o;
+        order.prev = before;
+        order.next = after;
+        if (before != kNil) orders_[before].next = o;
         else level.head = o;
-        level.tail = o;
+        if (after != kNil) orders_[after].prev = o;
+        else level.tail = o;
         level.total += qty;
         ++level.count;
         return true;
@@ -72,14 +90,14 @@ public:
 
     // The replacement gets a new id and goes to the back of the queue at its
     // new price, same side and instrument as the order it replaces.
-    bool replace(OrderId old_id, OrderId new_id, Price price, Qty qty) {
+    bool replace(OrderId old_id, OrderId new_id, Price price, Qty qty, Rank rank = Rank::Arrival) {
         const std::uint32_t o = ids_.find(old_id);
         if (o == kNil) return false;
         const Level& level = levels_[orders_[o].level];
         const Side side = level.side;
         const std::uint16_t book = level.book;
         unlink(o);
-        return add(book, new_id, side, price, qty);
+        return add(book, new_id, side, price, qty, rank);
     }
 
     // Trades up to qty against the resting orders on one side: best price
