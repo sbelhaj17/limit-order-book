@@ -4,9 +4,9 @@
 #include <functional>
 #include <map>
 #include <optional>
-#include <unordered_map>
 #include <vector>
 
+#include "lob/id_map.hpp"
 #include "lob/pool.hpp"
 #include "lob/types.hpp"
 
@@ -21,17 +21,15 @@ namespace lob {
 class Market {
 public:
     explicit Market(std::size_t instruments, std::size_t expected_orders = 1 << 20)
-        : books_(instruments), orders_(expected_orders), levels_(expected_orders / 8) {
-        ids_.reserve(expected_orders);
-    }
+        : books_(instruments), orders_(expected_orders), levels_(expected_orders / 8), ids_(expected_orders) {}
 
     bool add(std::uint16_t book, OrderId id, Side side, Price price, Qty qty) {
-        auto [it, inserted] = ids_.try_emplace(id, kNil);
-        if (!inserted) return false;
-
-        const std::uint32_t l = level_for(book, side, price);
         const std::uint32_t o = orders_.alloc();
-        it->second = o;
+        if (!ids_.insert(id, o)) {
+            orders_.release(o);
+            return false;
+        }
+        const std::uint32_t l = level_for(book, side, price);
 
         Level& level = levels_[l];
         Order& order = orders_[o];
@@ -51,11 +49,11 @@ public:
     // An execution or a partial cancel. The order keeps its place in the queue
     // and disappears once nothing is left.
     bool reduce(OrderId id, Qty qty) {
-        auto it = ids_.find(id);
-        if (it == ids_.end()) return false;
-        Order& order = orders_[it->second];
+        const std::uint32_t o = ids_.find(id);
+        if (o == kNil) return false;
+        Order& order = orders_[o];
         if (qty >= order.qty) {
-            unlink(it);
+            unlink(o);
             return true;
         }
         order.qty -= qty;
@@ -64,21 +62,21 @@ public:
     }
 
     bool remove(OrderId id) {
-        auto it = ids_.find(id);
-        if (it == ids_.end()) return false;
-        unlink(it);
+        const std::uint32_t o = ids_.find(id);
+        if (o == kNil) return false;
+        unlink(o);
         return true;
     }
 
     // The replacement gets a new id and goes to the back of the queue at its
     // new price, same side and instrument as the order it replaces.
     bool replace(OrderId old_id, OrderId new_id, Price price, Qty qty) {
-        auto it = ids_.find(old_id);
-        if (it == ids_.end()) return false;
-        const Level& level = levels_[orders_[it->second].level];
+        const std::uint32_t o = ids_.find(old_id);
+        if (o == kNil) return false;
+        const Level& level = levels_[orders_[o].level];
         const Side side = level.side;
         const std::uint16_t book = level.book;
-        unlink(it);
+        unlink(o);
         return add(book, new_id, side, price, qty);
     }
 
@@ -124,9 +122,8 @@ public:
     // True if this order is the next one to trade on its side: best price,
     // front of the queue.
     bool is_next_to_trade(OrderId id) const {
-        auto it = ids_.find(id);
-        if (it == ids_.end()) return false;
-        const std::uint32_t o = it->second;
+        const std::uint32_t o = ids_.find(id);
+        if (o == kNil) return false;
         const std::uint32_t l = orders_[o].level;
         const Level& level = levels_[l];
         if (level.head != o) return false;
@@ -135,9 +132,9 @@ public:
     }
 
     std::optional<Qty> quantity(OrderId id) const {
-        auto it = ids_.find(id);
-        if (it == ids_.end()) return std::nullopt;
-        return orders_[it->second].qty;
+        const std::uint32_t o = ids_.find(id);
+        if (o == kNil) return std::nullopt;
+        return orders_[o].qty;
     }
 
     std::size_t depth(std::uint16_t book, Side side) const {
@@ -172,8 +169,6 @@ private:
         std::map<Price, std::uint32_t> asks;                  // best (lowest) first
     };
 
-    using IdMap = std::unordered_map<OrderId, std::uint32_t>;
-
     Quote quote(std::uint32_t l) const {
         const Level& level = levels_[l];
         return Quote{level.price, level.total, level.count};
@@ -190,8 +185,7 @@ private:
         return slot;
     }
 
-    void unlink(IdMap::iterator it) {
-        const std::uint32_t o = it->second;
+    void unlink(std::uint32_t o) {
         const Order& order = orders_[o];
         const std::uint32_t l = order.level;
         Level& level = levels_[l];
@@ -208,8 +202,8 @@ private:
             else b.asks.erase(level.price);
             levels_.release(l);
         }
+        ids_.erase(order.id);
         orders_.release(o);
-        ids_.erase(it);
     }
 
     std::vector<Book> books_;
