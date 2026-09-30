@@ -6,6 +6,7 @@
 
 #include <fcntl.h>
 #include <sys/mman.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -13,7 +14,6 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
-#include <cstring>
 #include <span>
 #include <string>
 #include <string_view>
@@ -71,22 +71,22 @@ struct Snapshot {
 
 class BookBuilder : public itch::Handler {
 public:
-    explicit BookBuilder(Snapshot snap) : market_(1 << 16), symbols_(1 << 16), snap_(std::move(snap)) {}
+    explicit BookBuilder(Snapshot snap) : market_(1 << 16), snap_(std::move(snap)) {}
 
     Counts n;
+    std::uint64_t instruments = 0;
     std::uint64_t unknown_refs = 0;
     std::uint64_t peak_live = 0;
     // Of the executions at an order's own price, how many hit the order that
-    // was first in line at the best price. If the queues are maintained
-    // correctly this should be nearly all of them.
+    // was first in line at the best price. The exchange matches in price-time
+    // priority, so anything short of all of them means a queue is wrong.
     std::uint64_t in_priority = 0;
 
     void on_stock_directory(const itch::StockDirectory& m) {
         ++n.other;
+        ++instruments;
         std::string_view s = m.symbol;
-        s = s.substr(0, s.find(' '));
-        symbols_[m.locate] = std::string(s);
-        if (s == snap_.symbol) snap_locate_ = m.locate;
+        if (s.substr(0, s.find(' ')) == snap_.symbol) snap_locate_ = m.locate;
     }
 
     void on_add(const itch::AddOrder& m) {
@@ -152,7 +152,6 @@ private:
     }
 
     Market market_;
-    std::vector<std::string> symbols_;
     Snapshot snap_;
     int snap_locate_ = -1;
 };
@@ -182,20 +181,38 @@ void print_counts(const Counts& n) {
 // the same within noise on my machine, so the exact value is not important.
 constexpr std::size_t kLookahead = 8;
 
+// User-mode CPU time this process has used. The file is memory-mapped, so the
+// wall clock includes however long the disk takes to page 8 GB in, and on a
+// machine that cannot keep the whole file cached that is most of it. CPU time
+// is what the parser and the book actually cost.
+double cpu_seconds() {
+    rusage usage {};
+    ::getrusage(RUSAGE_SELF, &usage);
+    return static_cast<double>(usage.ru_utime.tv_sec) + static_cast<double>(usage.ru_utime.tv_usec) / 1e6;
+}
+
+struct Elapsed {
+    double cpu;
+    double wall;
+};
+
 template <class H>
-double timed_parse(std::span<const std::byte> data, H& handler) {
-    const auto start = std::chrono::steady_clock::now();
+Elapsed timed_parse(std::span<const std::byte> data, H& handler) {
+    const auto wall_start = std::chrono::steady_clock::now();
+    const double cpu_start = cpu_seconds();
     const std::size_t used = itch::parse(data, handler, kLookahead);
-    const std::chrono::duration<double> elapsed = std::chrono::steady_clock::now() - start;
+    const double cpu = cpu_seconds() - cpu_start;
+    const std::chrono::duration<double> wall = std::chrono::steady_clock::now() - wall_start;
     if (used != data.size()) {
         std::fprintf(stderr, "warning: stopped %zu bytes before the end (truncated file?)\n", data.size() - used);
     }
-    return elapsed.count();
+    return {cpu, wall.count()};
 }
 
-void print_speed(std::uint64_t messages, double seconds) {
-    std::printf("%s messages in %.2f s: %.1f M msg/s, %.0f ns/msg\n", commas(messages).c_str(), seconds,
-                static_cast<double>(messages) / seconds / 1e6, seconds * 1e9 / static_cast<double>(messages));
+void print_speed(std::uint64_t messages, Elapsed t) {
+    std::printf("%s messages: %.2f s cpu (%.2f s wall), %.1f M msg/s, %.0f ns/msg\n", commas(messages).c_str(),
+                t.cpu, t.wall, static_cast<double>(messages) / t.cpu / 1e6,
+                t.cpu * 1e9 / static_cast<double>(messages));
 }
 
 }  // namespace
@@ -240,21 +257,21 @@ int main(int argc, char** argv) {
         std::perror("mmap");
         return 1;
     }
-    ::madvise(map, size, MADV_SEQUENTIAL);
     const std::span<const std::byte> data(static_cast<const std::byte*>(map), size);
 
     std::printf("%s (%.2f GB)\n", path, static_cast<double>(size) / 1e9);
 
     if (parse_only) {
         Counter counter;
-        const double seconds = timed_parse(data, counter);
+        const Elapsed elapsed = timed_parse(data, counter);
         print_counts(counter.n);
-        print_speed(counter.n.total(), seconds);
+        print_speed(counter.n.total(), elapsed);
     } else {
         BookBuilder builder(snap);
-        const double seconds = timed_parse(data, builder);
+        const Elapsed elapsed = timed_parse(data, builder);
         print_counts(builder.n);
-        print_speed(builder.n.total(), seconds);
+        print_speed(builder.n.total(), elapsed);
+        std::printf("instruments: %s\n", commas(builder.instruments).c_str());
         std::printf("orders resting at the end: %s (peak %s)\n", commas(builder.live_orders()).c_str(),
                     commas(builder.peak_live).c_str());
         std::printf("messages the book could not apply: %s\n", commas(builder.unknown_refs).c_str());
