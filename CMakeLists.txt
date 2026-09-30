@@ -43,3 +43,19 @@ add_executable(lob_tests
 target_link_libraries(lob_tests PRIVATE lob GTest::gtest_main)
 include(GoogleTest)
 gtest_discover_tests(lob_tests)
+
+option(LOB_BENCH "Build the benchmarks" ON)
+if(LOB_BENCH)
+  FetchContent_Declare(
+    benchmark
+    URL https://github.com/google/benchmark/archive/refs/tags/v1.9.4.tar.gz
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+  )
+  set(BENCHMARK_ENABLE_TESTING OFF CACHE BOOL "" FORCE)
+  set(BENCHMARK_ENABLE_GTEST_TESTS OFF CACHE BOOL "" FORCE)
+  set(BENCHMARK_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
+  FetchContent_MakeAvailable(benchmark)
+
+  add_executable(engine_bench bench/engine_bench.cpp)
+  target_link_libraries(engine_bench PRIVATE lob benchmark::benchmark)
+endif()

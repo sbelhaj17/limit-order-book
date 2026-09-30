@@ -1,0 +1,34 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        build: [Release, Sanitize]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: configure
+        run: |
+          if [ "${{ matrix.build }}" = "Sanitize" ]; then
+            cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DLOB_SANITIZE=ON -DLOB_BENCH=OFF
+          else
+            cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+          fi
+
+      - name: build
+        run: cmake --build build -j 4
+
+      - name: test
+        run: ctest --test-dir build --output-on-failure
+
+      - name: benchmark
+        if: matrix.build == 'Release'
+        run: ./build/engine_bench --benchmark_min_time=0.2s
