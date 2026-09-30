@@ -84,6 +84,20 @@ public:
         return Quote{price, level.total, level.queue.size()};
     }
 
+    // The n best price levels on one side, best first.
+    std::vector<Quote> top(std::uint16_t book, Side side, std::size_t n) const {
+        std::vector<Quote> out;
+        auto collect = [&](const auto& levels) {
+            for (const auto& [price, level] : levels) {
+                if (out.size() == n) break;
+                out.push_back(Quote{price, level.total, level.queue.size()});
+            }
+        };
+        if (side == Side::Buy) collect(books_[book].bids);
+        else collect(books_[book].asks);
+        return out;
+    }
+
     // True if this order is the next one to trade on its side: best price,
     // front of the queue.
     bool is_next_to_trade(OrderId id) const {

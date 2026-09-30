@@ -19,10 +19,14 @@ add_library(lob INTERFACE)
 target_include_directories(lob INTERFACE include)
 target_compile_options(lob INTERFACE -Wall -Wextra -Wpedantic)
 
+add_executable(itch_replay src/itch_replay.cpp)
+target_link_libraries(itch_replay PRIVATE lob)
+
 include(FetchContent)
 FetchContent_Declare(
   googletest
   URL https://github.com/google/googletest/archive/refs/tags/v1.17.0.tar.gz
+  DOWNLOAD_EXTRACT_TIMESTAMP TRUE
 )
 set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
 set(BUILD_GMOCK OFF CACHE BOOL "" FORCE)
@@ -30,6 +34,7 @@ FetchContent_MakeAvailable(googletest)
 
 enable_testing()
 add_executable(lob_tests
+  tests/itch_test.cpp
   tests/market_test.cpp
 )
 target_link_libraries(lob_tests PRIVATE lob GTest::gtest_main)
