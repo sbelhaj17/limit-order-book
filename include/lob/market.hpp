@@ -1,8 +1,6 @@
 #pragma once
 
 #include <cstddef>
-#include <functional>
-#include <map>
 #include <optional>
 #include <vector>
 
@@ -15,9 +13,12 @@ namespace lob {
 // All the books for one trading day, keyed by a small integer per instrument
 // (ITCH calls it the stock locate). Order ids are unique across the whole market.
 //
-// Orders live in a pool and each price level threads a doubly linked list
-// through them, so taking an order out of its queue touches its two neighbours
-// and nothing else.
+// Layout:
+//   - orders sit in one pool; each price level threads a doubly linked list
+//     through them, so unlinking an order touches its two neighbours only
+//   - levels sit in a second pool; each side of each book is a small sorted
+//     vector of (price, level) with the best price at the back
+//   - an open-addressing table maps order id to pool slot
 class Market {
 public:
     explicit Market(std::size_t instruments, std::size_t expected_orders = 1 << 20)
@@ -81,41 +82,29 @@ public:
     }
 
     std::optional<Quote> best(std::uint16_t book, Side side) const {
-        const Book& b = books_[book];
-        if (side == Side::Buy) {
-            if (b.bids.empty()) return std::nullopt;
-            return quote(b.bids.begin()->second);
-        }
-        if (b.asks.empty()) return std::nullopt;
-        return quote(b.asks.begin()->second);
+        const Ladder& ladder = books_[book].side(side);
+        if (ladder.empty()) return std::nullopt;
+        return quote(ladder.back().level);
     }
 
     // The n best price levels on one side, best first.
     std::vector<Quote> top(std::uint16_t book, Side side, std::size_t n) const {
+        const Ladder& ladder = books_[book].side(side);
         std::vector<Quote> out;
-        auto collect = [&](const auto& levels) {
-            for (const auto& [price, l] : levels) {
-                if (out.size() == n) break;
-                out.push_back(quote(l));
-            }
-        };
-        if (side == Side::Buy) collect(books_[book].bids);
-        else collect(books_[book].asks);
+        for (auto it = ladder.rbegin(); it != ladder.rend() && out.size() < n; ++it) out.push_back(quote(it->level));
         return out;
     }
 
     // Ids resting at one price, in the order they would trade.
     std::vector<OrderId> queue(std::uint16_t book, Side side, Price price) const {
         std::vector<OrderId> out;
-        const Book& b = books_[book];
-        std::uint32_t l = kNil;
-        if (side == Side::Buy) {
-            if (auto it = b.bids.find(price); it != b.bids.end()) l = it->second;
-        } else {
-            if (auto it = b.asks.find(price); it != b.asks.end()) l = it->second;
+        const Ladder& ladder = books_[book].side(side);
+        const std::uint32_t k = key(side, price);
+        const std::size_t i = position(ladder, k);
+        if (i == 0 || ladder[i - 1].key != k) return out;
+        for (std::uint32_t o = levels_[ladder[i - 1].level].head; o != kNil; o = orders_[o].next) {
+            out.push_back(orders_[o].id);
         }
-        if (l == kNil) return out;
-        for (std::uint32_t o = levels_[l].head; o != kNil; o = orders_[o].next) out.push_back(orders_[o].id);
         return out;
     }
 
@@ -126,9 +115,7 @@ public:
         if (o == kNil) return false;
         const std::uint32_t l = orders_[o].level;
         const Level& level = levels_[l];
-        if (level.head != o) return false;
-        const Book& b = books_[level.book];
-        return l == (level.side == Side::Buy ? b.bids.begin()->second : b.asks.begin()->second);
+        return level.head == o && books_[level.book].side(level.side).back().level == l;
     }
 
     std::optional<Qty> quantity(OrderId id) const {
@@ -137,10 +124,7 @@ public:
         return orders_[o].qty;
     }
 
-    std::size_t depth(std::uint16_t book, Side side) const {
-        return side == Side::Buy ? books_[book].bids.size() : books_[book].asks.size();
-    }
-
+    std::size_t depth(std::uint16_t book, Side side) const { return books_[book].side(side).size(); }
     std::size_t live_orders() const { return ids_.size(); }
     std::size_t instruments() const { return books_.size(); }
 
@@ -164,10 +148,37 @@ private:
         Side side;
     };
 
-    struct Book {
-        std::map<Price, std::uint32_t, std::greater<>> bids;  // best (highest) first
-        std::map<Price, std::uint32_t> asks;                  // best (lowest) first
+    struct LevelRef {
+        std::uint32_t key;
+        std::uint32_t level;
     };
+
+    // One side of one book, ascending by key, so the best price is at the back
+    // where inserting and erasing are cheap.
+    using Ladder = std::vector<LevelRef>;
+
+    struct Book {
+        Ladder bids;
+        Ladder asks;
+
+        Ladder& side(Side s) { return s == Side::Buy ? bids : asks; }
+        const Ladder& side(Side s) const { return s == Side::Buy ? bids : asks; }
+    };
+
+    // Ask prices are flipped so that on both sides a better price is a larger
+    // key. Nothing below has to branch on the side after this.
+    static std::uint32_t key(Side side, Price price) { return side == Side::Buy ? price : ~price; }
+
+    // How many entries have a key <= k, which is also where k would be
+    // inserted. If k is present it is at position - 1.
+    //
+    // Walks in from the best price because that is where nearly everything
+    // happens; a binary search would touch colder memory for no gain.
+    static std::size_t position(const Ladder& ladder, std::uint32_t k) {
+        std::size_t i = ladder.size();
+        while (i > 0 && ladder[i - 1].key > k) --i;
+        return i;
+    }
 
     Quote quote(std::uint32_t l) const {
         const Level& level = levels_[l];
@@ -175,14 +186,15 @@ private:
     }
 
     std::uint32_t level_for(std::uint16_t book, Side side, Price price) {
-        Book& b = books_[book];
-        std::uint32_t& slot = side == Side::Buy ? b.bids.try_emplace(price, kNil).first->second
-                                                : b.asks.try_emplace(price, kNil).first->second;
-        if (slot == kNil) {
-            slot = levels_.alloc();
-            levels_[slot] = Level{price, 0, kNil, kNil, 0, book, side};
-        }
-        return slot;
+        Ladder& ladder = books_[book].side(side);
+        const std::uint32_t k = key(side, price);
+        const std::size_t i = position(ladder, k);
+        if (i > 0 && ladder[i - 1].key == k) return ladder[i - 1].level;
+
+        const std::uint32_t l = levels_.alloc();
+        levels_[l] = Level{price, 0, kNil, kNil, 0, book, side};
+        ladder.insert(ladder.begin() + static_cast<std::ptrdiff_t>(i), LevelRef{k, l});
+        return l;
     }
 
     void unlink(std::uint32_t o) {
@@ -197,9 +209,9 @@ private:
 
         level.total -= order.qty;
         if (--level.count == 0) {
-            Book& b = books_[level.book];
-            if (level.side == Side::Buy) b.bids.erase(level.price);
-            else b.asks.erase(level.price);
+            Ladder& ladder = books_[level.book].side(level.side);
+            const std::size_t i = position(ladder, key(level.side, level.price));
+            ladder.erase(ladder.begin() + static_cast<std::ptrdiff_t>(i - 1));
             levels_.release(l);
         }
         ids_.erase(order.id);
