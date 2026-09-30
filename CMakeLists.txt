@@ -34,6 +34,7 @@ FetchContent_MakeAvailable(googletest)
 
 enable_testing()
 add_executable(lob_tests
+  tests/differential_test.cpp
   tests/itch_test.cpp
   tests/market_test.cpp
 )

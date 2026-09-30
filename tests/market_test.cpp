@@ -2,21 +2,31 @@
 
 #include <gtest/gtest.h>
 
+#include "reference_market.hpp"
+
 using namespace lob;
 
 namespace {
 
 constexpr std::uint16_t kBook = 0;
 
-TEST(Market, EmptyBookHasNoQuotes) {
-    Market m(1);
+// Every test runs against the real book and against the reference, which
+// keeps the two from drifting apart in behaviour.
+template <class M>
+class MarketTest : public ::testing::Test {};
+
+using Implementations = ::testing::Types<Market, reference::Market>;
+TYPED_TEST_SUITE(MarketTest, Implementations);
+
+TYPED_TEST(MarketTest, EmptyBookHasNoQuotes) {
+    TypeParam m(1);
     EXPECT_FALSE(m.best(kBook, Side::Buy));
     EXPECT_FALSE(m.best(kBook, Side::Sell));
     EXPECT_EQ(m.live_orders(), 0u);
 }
 
-TEST(Market, BestBidIsHighestAndBestAskIsLowest) {
-    Market m(1);
+TYPED_TEST(MarketTest, BestBidIsHighestAndBestAskIsLowest) {
+    TypeParam m(1);
     m.add(kBook, 1, Side::Buy, 9900, 100);
     m.add(kBook, 2, Side::Buy, 9950, 200);
     m.add(kBook, 3, Side::Buy, 9800, 300);
@@ -34,8 +44,8 @@ TEST(Market, BestBidIsHighestAndBestAskIsLowest) {
     EXPECT_EQ(m.depth(kBook, Side::Sell), 2u);
 }
 
-TEST(Market, OrdersAtOnePriceAddUp) {
-    Market m(1);
+TYPED_TEST(MarketTest, OrdersAtOnePriceAddUp) {
+    TypeParam m(1);
     m.add(kBook, 1, Side::Sell, 10000, 100);
     m.add(kBook, 2, Side::Sell, 10000, 250);
     auto ask = m.best(kBook, Side::Sell);
@@ -45,8 +55,8 @@ TEST(Market, OrdersAtOnePriceAddUp) {
     EXPECT_EQ(m.depth(kBook, Side::Sell), 1u);
 }
 
-TEST(Market, QueueIsFirstInFirstOut) {
-    Market m(1);
+TYPED_TEST(MarketTest, QueueIsFirstInFirstOut) {
+    TypeParam m(1);
     m.add(kBook, 1, Side::Buy, 10000, 100);
     m.add(kBook, 2, Side::Buy, 10000, 100);
     m.add(kBook, 3, Side::Buy, 10000, 100);
@@ -58,16 +68,28 @@ TEST(Market, QueueIsFirstInFirstOut) {
     EXPECT_FALSE(m.is_next_to_trade(3));
 }
 
-TEST(Market, OnlyTheBestPriceIsNextToTrade) {
-    Market m(1);
+TYPED_TEST(MarketTest, QueueListsOrdersInPriority) {
+    TypeParam m(1);
+    m.add(kBook, 7, Side::Sell, 10000, 100);
+    m.add(kBook, 3, Side::Sell, 10000, 100);
+    m.add(kBook, 9, Side::Sell, 10000, 100);
+    m.remove(3);
+    m.add(kBook, 4, Side::Sell, 10000, 100);
+    EXPECT_EQ(m.queue(kBook, Side::Sell, 10000), (std::vector<OrderId>{7, 9, 4}));
+    EXPECT_TRUE(m.queue(kBook, Side::Sell, 10010).empty());
+    EXPECT_TRUE(m.queue(kBook, Side::Buy, 10000).empty());
+}
+
+TYPED_TEST(MarketTest, OnlyTheBestPriceIsNextToTrade) {
+    TypeParam m(1);
     m.add(kBook, 1, Side::Sell, 10010, 100);
     m.add(kBook, 2, Side::Sell, 10000, 100);
     EXPECT_FALSE(m.is_next_to_trade(1));
     EXPECT_TRUE(m.is_next_to_trade(2));
 }
 
-TEST(Market, PartialFillKeepsQueuePosition) {
-    Market m(1);
+TYPED_TEST(MarketTest, PartialFillKeepsQueuePosition) {
+    TypeParam m(1);
     m.add(kBook, 1, Side::Buy, 10000, 100);
     m.add(kBook, 2, Side::Buy, 10000, 100);
 
@@ -77,8 +99,8 @@ TEST(Market, PartialFillKeepsQueuePosition) {
     EXPECT_EQ(m.best(kBook, Side::Buy)->qty, 160u);
 }
 
-TEST(Market, FillingAnOrderRemovesIt) {
-    Market m(1);
+TYPED_TEST(MarketTest, FillingAnOrderRemovesIt) {
+    TypeParam m(1);
     m.add(kBook, 1, Side::Buy, 10000, 100);
     m.add(kBook, 2, Side::Buy, 9990, 100);
 
@@ -90,8 +112,8 @@ TEST(Market, FillingAnOrderRemovesIt) {
     EXPECT_EQ(m.depth(kBook, Side::Buy), 1u);
 }
 
-TEST(Market, ReplaceLosesPriority) {
-    Market m(1);
+TYPED_TEST(MarketTest, ReplaceLosesPriority) {
+    TypeParam m(1);
     m.add(kBook, 1, Side::Sell, 10000, 100);
     m.add(kBook, 2, Side::Sell, 10000, 100);
 
@@ -103,8 +125,8 @@ TEST(Market, ReplaceLosesPriority) {
     EXPECT_EQ(m.best(kBook, Side::Sell)->qty, 600u);
 }
 
-TEST(Market, ReplaceCanMoveThePrice) {
-    Market m(1);
+TYPED_TEST(MarketTest, ReplaceCanMoveThePrice) {
+    TypeParam m(1);
     m.add(kBook, 1, Side::Buy, 10000, 100);
     ASSERT_TRUE(m.replace(1, 2, 10020, 100));
     auto bid = m.best(kBook, Side::Buy);
@@ -112,8 +134,8 @@ TEST(Market, ReplaceCanMoveThePrice) {
     EXPECT_EQ(m.depth(kBook, Side::Buy), 1u);
 }
 
-TEST(Market, UnknownAndDuplicateIdsAreRejected) {
-    Market m(1);
+TYPED_TEST(MarketTest, UnknownAndDuplicateIdsAreRejected) {
+    TypeParam m(1);
     EXPECT_TRUE(m.add(kBook, 1, Side::Buy, 10000, 100));
     EXPECT_FALSE(m.add(kBook, 1, Side::Buy, 10010, 100));
     EXPECT_FALSE(m.reduce(99, 10));
@@ -123,8 +145,8 @@ TEST(Market, UnknownAndDuplicateIdsAreRejected) {
     EXPECT_EQ(m.best(kBook, Side::Buy)->price, 10000u);
 }
 
-TEST(Market, InstrumentsDoNotSeeEachOther) {
-    Market m(3);
+TYPED_TEST(MarketTest, InstrumentsDoNotSeeEachOther) {
+    TypeParam m(3);
     m.add(0, 1, Side::Buy, 10000, 100);
     m.add(2, 2, Side::Buy, 20000, 100);
     EXPECT_EQ(m.best(0, Side::Buy)->price, 10000u);
