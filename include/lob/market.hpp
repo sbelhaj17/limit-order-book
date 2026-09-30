@@ -81,6 +81,9 @@ public:
         return add(book, new_id, side, price, qty);
     }
 
+    // Hint that this id is about to be added or looked up.
+    void prefetch(OrderId id) const { ids_.prefetch(id); }
+
     std::optional<Quote> best(std::uint16_t book, Side side) const {
         const Ladder& ladder = books_[book].side(side);
         if (ladder.empty()) return std::nullopt;

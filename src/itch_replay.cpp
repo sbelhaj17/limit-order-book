@@ -128,6 +128,8 @@ public:
     void on_system_event(const itch::SystemEvent&) { ++n.other; }
     void on_other(char) { ++n.other; }
 
+    void on_upcoming(OrderId ref) { market_.prefetch(ref); }
+
     std::size_t live_orders() const { return market_.live_orders(); }
 
 private:
@@ -176,10 +178,14 @@ void print_counts(const Counts& n) {
     std::printf("  %-22s %15s\n", "everything else", commas(n.other).c_str());
 }
 
+// How many messages ahead to prefetch order ids. Anything from 2 to 32 measured
+// the same within noise on my machine, so the exact value is not important.
+constexpr std::size_t kLookahead = 8;
+
 template <class H>
 double timed_parse(std::span<const std::byte> data, H& handler) {
     const auto start = std::chrono::steady_clock::now();
-    const std::size_t used = itch::parse(data, handler);
+    const std::size_t used = itch::parse(data, handler, kLookahead);
     const std::chrono::duration<double> elapsed = std::chrono::steady_clock::now() - start;
     if (used != data.size()) {
         std::fprintf(stderr, "warning: stopped %zu bytes before the end (truncated file?)\n", data.size() - used);

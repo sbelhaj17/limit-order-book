@@ -68,6 +68,10 @@ public:
         return true;
     }
 
+    // Starts loading the slot this id hashes to. Worth calling a few messages
+    // before the id is actually needed; see itch::parse.
+    void prefetch(OrderId id) const { __builtin_prefetch(&slots_[home(id)]); }
+
     std::size_t size() const { return size_; }
     std::size_t capacity() const { return slots_.size(); }
 

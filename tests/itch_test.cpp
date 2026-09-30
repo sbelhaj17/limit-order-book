@@ -251,6 +251,48 @@ TEST(Itch, StopsAtATruncatedMessage) {
     EXPECT_EQ(r.deletes.size(), 1u);
 }
 
+struct Peeker : itch::Handler {
+    std::vector<OrderId> upcoming;
+    std::vector<OrderId> handled;
+    // every id must be announced before its message is delivered
+    bool announced_first = true;
+
+    void on_upcoming(OrderId ref) { upcoming.push_back(ref); }
+    void on_delete(const itch::OrderDelete& m) {
+        handled.push_back(m.ref);
+        if (upcoming.size() < handled.size()) announced_first = false;
+    }
+};
+
+TEST(Itch, LookaheadAnnouncesEveryOrderIdOnceAndInOrder) {
+    std::vector<std::byte> stream;
+    std::vector<OrderId> refs;
+    for (OrderId ref = 100; ref < 140; ++ref) {
+        Message d('D', 1, ref);
+        d.u64(ref);
+        d.append_to(stream);
+        refs.push_back(ref);
+        if (ref % 7 == 0) {  // something without an order id in between
+            Message s('S', 0, ref);
+            s.ch('Q');
+            s.append_to(stream);
+        }
+    }
+
+    for (std::size_t lookahead : {1u, 8u, 39u, 40u, 1000u}) {
+        Peeker p;
+        EXPECT_EQ(itch::parse(stream, p, lookahead), stream.size());
+        EXPECT_EQ(p.handled, refs) << "lookahead " << lookahead;
+        EXPECT_EQ(p.upcoming, refs) << "lookahead " << lookahead;
+        EXPECT_TRUE(p.announced_first) << "lookahead " << lookahead;
+    }
+
+    Peeker off;
+    itch::parse(stream, off);
+    EXPECT_EQ(off.handled, refs);
+    EXPECT_TRUE(off.upcoming.empty());
+}
+
 TEST(Itch, ShortBodyIsNotDecoded) {
     // claims to be an add but is too short to hold one
     Message bad('A', 1, 1);
