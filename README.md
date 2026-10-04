@@ -39,16 +39,18 @@ That 100% is weaker evidence than it looks. I found the rule by looking at this 
 
 ## How it got faster
 
-Each row is a commit, replaying the full day. The older ones were timed with `/usr/bin/time`, the newer ones by the tool itself.
+Each row is a commit. The first number is the one in that commit's message: wall time on the first 1.5 GB of the file (48M messages), not the full day. I have not yet gone back and re-timed each commit on the full day with user CPU time, so that column only has the last row, which is the code the results above come from.
 
-| commit | change | ns per message |
-|---|---|---|
-| `096b370` | `std::map` per side, `std::list` per level, `std::unordered_map` for ids | ~310 |
-| `cde3aa3` | orders in a pool, intrusive doubly linked queue per level | ~290 |
-| `1f69eb8` | open-addressing hash table for ids | ~145 |
-| `09ee4e0` | price levels in a sorted vector with the best price at the back | 88 |
-| `b744639` | prefetch the id table a few messages ahead | 68 |
-| `6624666` | queue by id (for correctness, not speed) | 66 |
+| commit | change | ns per message, 1.5 GB slice, wall | full day, user CPU |
+|---|---|---|---|
+| `096b370` | `std::map` per side, `std::list` per level, `std::unordered_map` for ids | 285 | not redone yet |
+| `cde3aa3` | orders in a pool, intrusive doubly linked queue per level | 257 | not redone yet |
+| `1f69eb8` | open-addressing hash table for ids | ~130 | not redone yet |
+| `09ee4e0` | price levels in a sorted vector with the best price at the back | 77 | not redone yet |
+| `b744639` | prefetch the id table a few messages ahead | ~60 | not redone yet |
+| `6624666` | queue by id (for correctness, not speed) | not timed | 66 |
+
+On the slice, the first five rows come to about 4.7x. The two columns are measured differently, so a ratio across them would mean nothing.
 
 What mattered, in order:
 
