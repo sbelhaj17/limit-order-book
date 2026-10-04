@@ -39,7 +39,7 @@ That 100% is weaker evidence than it looks. I found the rule by looking at this 
 
 ## How it got faster
 
-Each row is a commit. The first number is the one in that commit's message: wall time on the first 1.5 GB of the file (48M messages), not the full day. I have not yet gone back and re-timed each commit on the full day with user CPU time, so that column only has the last row, which is the code the results above come from.
+Each row is a commit. The first number is the one in that commit's message: wall time on the first 1.5 GB of the file (48M messages), not the full day. I have not yet gone back and re-timed each commit on the full day with user CPU time, so the full-day column only has the last row, which is the code the results above come from.
 
 | commit | change | ns per message, 1.5 GB slice, wall | full day, user CPU |
 |---|---|---|---|
@@ -91,6 +91,7 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build -j
 ctest --test-dir build
 ./build/engine_bench
+./build/flow_mix
 ```
 
 ```
