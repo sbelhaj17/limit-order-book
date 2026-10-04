@@ -17,9 +17,11 @@ NASDAQ publishes a few sample days of ITCH. I used 30 December 2019 (`scripts/ge
 | parsing alone | 1.4 s of user CPU, about 5 ns per message |
 | messages that referred to an order the book did not have | 0 |
 | orders left in the book after the close | 0 |
-| executions that hit the order at the front of the best level | 5,722,824 of 5,722,824 |
+| order-executed (`E`) messages that hit the order at the front of the best level | 5,722,824 of 5,722,824 |
 
-The last row is the check I trust most. An exchange matches in price-time priority, so every execution in the feed should hit whichever order my book has first in line at the best price. If any queue were built wrong, whether from a parsing bug, a wrong offset, or a replace handled badly, some executions would land on an order the book thinks is second or third.
+The last row is the check I trust most. An exchange matches in price-time priority, so an execution should hit whichever order my book has first in line at the best price. If any queue were built wrong, whether from a parsing bug, a wrong offset, or a replace handled badly, some executions would land on an order the book thinks is second or third.
+
+It covers order-executed (`E`) messages only, not every execution in the feed. An order executed at a price other than the one it was displayed at comes as a `C` message, which the replay applies to the book but does not check, and trades against hidden orders (`P`) never touch the book at all.
 
 Times are user CPU time (`ru_utime` from `getrusage`), which leaves out the kernel's time paging the file in. The wall clock is less useful here: the unpacked file is 8.3 GB, and with a browser open my laptop could not keep it all in the page cache, so a replay spent as long waiting on the disk as it did running (17 s wall with the file cached, 33 s once it no longer fit).
 
@@ -32,6 +34,8 @@ The first version queued each order behind whatever was already at its price, in
 In every one of the 10,565, the order that traded had the lowest order reference number at its price. The spec says the reference number is assigned when NASDAQ receives the order. So those orders reached the exchange before the ones ahead of them in my queue, but showed up in the feed later. My reading is that they were entered before the open, or during a halt, and only published once trading started, behind orders that came in later but were already on the book.
 
 `Market::add` now takes a `Rank`. With `Rank::Id` an order goes ahead of any order at its price with a larger id; the replay uses that, and it brings the count to 5,722,824 of 5,722,824. With `Rank::Arrival`, the default, an order joins the back of the queue, which is what the matching engine wants.
+
+That 100% is weaker evidence than it looks. I found the rule by looking at this day's misses and checked it on the same day, and since every miss was the lowest id at its price, queueing by id fixes those 10,565 by construction. What the replay does show is that the change broke none of the other 5,712,259. I have not tried it on a second day.
 
 ## How it got faster
 
