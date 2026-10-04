@@ -50,7 +50,7 @@ Each row is a commit. The first number is the one in that commit's message: wall
 | `b744639` | prefetch the id table a few messages ahead | ~60 | not redone yet |
 | `6624666` | queue by id (for correctness, not speed) | not timed | 66 |
 
-On the slice, the first five rows come to about 4.7x. The two columns are measured differently, so a ratio across them would mean nothing.
+On the slice that is 285 down to ~60, about 4.7x. The two columns are measured differently, so a ratio across them would mean nothing.
 
 What mattered, in order:
 
