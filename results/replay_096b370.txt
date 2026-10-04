@@ -1,0 +1,13 @@
+data/12302019.NASDAQ_ITCH50 (8.25 GB)
+  add                        118,631,456
+  executed                     5,722,824
+  executed with price             99,917
+  cancel                       2,787,676
+  delete                     114,360,997
+  replace                     21,639,067
+  hidden trade                 1,218,602
+  everything else              4,284,241
+268,744,780 messages in 71.70 s: 3.7 M msg/s, 267 ns/msg
+orders resting at the end: 0 (peak 1,924,078)
+messages the book could not apply: 0
+executions that hit the front of the best level: 5,712,259 of 5,722,824 (99.815%)

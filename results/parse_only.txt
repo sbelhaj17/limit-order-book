@@ -1,0 +1,29 @@
+# ./build/itch_replay data/12302019.NASDAQ_ITCH50 --parse-only, file in the page cache, 2026-10-04 00:10
+data/12302019.NASDAQ_ITCH50 (8.25 GB)
+  add                        118,631,456
+  executed                     5,722,824
+  executed with price             99,917
+  cancel                       2,787,676
+  delete                     114,360,997
+  replace                     21,639,067
+  hidden trade                 1,218,602
+  everything else              4,284,241
+268,744,780 messages: 1.47 s cpu (2.24 s wall), 182.8 M msg/s, 5 ns/msg
+        2.26 real         1.47 user         0.79 sys
+          8252522496  maximum resident set size
+                   0  average shared memory size
+                   0  average unshared data size
+                   0  average unshared stack size
+              503872  page reclaims
+                   3  page faults
+                   0  swaps
+                   0  block input operations
+                   0  block output operations
+                   0  messages sent
+                   0  messages received
+                   0  signals received
+                   0  voluntary context switches
+                  14  involuntary context switches
+         23959032497  instructions retired
+          9238636908  cycles elapsed
+             4921320  peak memory footprint

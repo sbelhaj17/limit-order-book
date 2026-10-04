@@ -6,15 +6,15 @@ There are two halves. `Market` keeps the books: orders, price levels, queues. `E
 
 ## Results on a real day
 
-NASDAQ publishes a few sample days of ITCH. I used 30 December 2019 (`scripts/get_itch.sh` fetches it).
+NASDAQ publishes a few sample days of ITCH. I used 30 December 2019 (`scripts/get_itch.sh` fetches it). The numbers below are from `results/replay_b7426a5.txt`, the replay's own output, and `results/retime.txt`.
 
 | | |
 |---|---|
 | messages | 268,744,780 |
 | instruments | 8,906 |
 | peak resting orders | 1,924,078 |
-| time, on an Apple M4 | 17.6 s of user CPU, about 66 ns per message (15 M messages/s) |
-| parsing alone | 1.4 s of user CPU, about 5 ns per message |
+| time, on an Apple M4 | 15.5 s of user CPU, about 58 ns per message (17 M messages/s) |
+| parsing alone | 1.5 s of user CPU, about 5 ns per message |
 | messages that referred to an order the book did not have | 0 |
 | orders left in the book after the close | 0 |
 | order-executed (`E`) messages that hit the order at the front of the best level | 5,722,824 of 5,722,824 |
@@ -23,34 +23,34 @@ The last row is the check I trust most. An exchange matches in price-time priori
 
 It covers order-executed (`E`) messages only, not every execution in the feed. An order executed at a price other than the one it was displayed at comes as a `C` message, which the replay applies to the book but does not check, and trades against hidden orders (`P`) never touch the book at all.
 
-Times are user CPU time (`ru_utime` from `getrusage`), which leaves out the kernel's time paging the file in. The wall clock is less useful here: the unpacked file is 8.3 GB, and with a browser open my laptop could not keep it all in the page cache, so a replay spent as long waiting on the disk as it did running (17 s wall with the file cached, 33 s once it no longer fit).
+Times are user CPU time, which leaves out the kernel's time paging the file in. The wall clock is less useful here: the unpacked file is 8.3 GB, and with a browser open my laptop could not keep it all in the page cache, so a replay spent as long waiting on the disk as it did running (16.5 s wall with the file cached, 33 s once it no longer fit, in commit `de7916a`). My first full-day runs, on 30 September, gave 17.6 s of user CPU. The 15.5 s above is the median of three runs on 3 October with the same replay code and the machine otherwise idle; I don't know what made the earlier runs slower.
 
-The parse-only figure is about a tenth of the 51 ns per message in the commit that added the tool (`096b370`). That one was wall time on the first 1.5 GB of the file, so it included waiting for pages of the mapped file, and a parse that does almost nothing per message is the run where that matters most. The parser has only gained work since then (the lookahead cursor), so I put the gap down to how it was measured rather than to the code. I have not re-timed it to check.
+The parse-only figure is about a tenth of the 51 ns per message in the commit that added the tool (`096b370`). That one was wall time on the first 1.5 GB of the file, so it included waiting for pages of the mapped file, and a parse that does almost nothing per message is the run where that matters most. With the file in the page cache the whole day parses in 1.47 s of user CPU and 2.26 s of wall time (`results/parse_only.txt`), so even the wall clock comes to about 8 ns per message, and the 51 ns was most likely the disk.
 
 ## The 0.2% that didn't match
 
-The first version queued each order behind whatever was already at its price, in the order the feed showed them. That gave 5,712,259 of 5,722,824 executions at the front of the queue, 99.815%. The other 10,565 were always at the best price, so the right level but the wrong order within it. About four in five came in the first twenty minutes after the open.
+The first version queued each order behind whatever was already at its price, in the order the feed showed them. That gave 5,712,259 of 5,722,824 executions at the front of the queue, 99.815% (`results/replay_de7916a.txt`, the last commit before the fix). The other 10,565 were always at the best price, so the right level but the wrong order within it. About four in five came in the first twenty minutes after the open.
 
 In every one of the 10,565, the order that traded had the lowest order reference number at its price. The spec says the reference number is assigned when NASDAQ receives the order. So those orders reached the exchange before the ones ahead of them in my queue, but showed up in the feed later. My reading is that they were entered before the open, or during a halt, and only published once trading started, behind orders that came in later but were already on the book.
 
-`Market::add` now takes a `Rank`. With `Rank::Id` an order goes ahead of any order at its price with a larger id; the replay uses that, and it brings the count to 5,722,824 of 5,722,824. With `Rank::Arrival`, the default, an order joins the back of the queue, which is what the matching engine wants.
+`Market::add` now takes a `Rank`. With `Rank::Id` an order goes ahead of any order at its price with a larger id; the replay uses that, and it brings the count to 5,722,824 of 5,722,824 (`results/replay_6624666.txt`). With `Rank::Arrival`, the default, an order joins the back of the queue, which is what the matching engine wants.
 
 That 100% is weaker evidence than it looks. I found the rule by looking at this day's misses and checked it on the same day, and since every miss was the lowest id at its price, queueing by id fixes those 10,565 by construction. What the replay does show is that the change broke none of the other 5,712,259. I have not tried it on a second day.
 
 ## How it got faster
 
-Each row is a commit. The first number is the one in that commit's message: wall time on the first 1.5 GB of the file (48M messages), not the full day. I have not yet gone back and re-timed each commit on the full day with user CPU time, so the full-day column only has the last row, which is the code the results above come from.
+Each row is a commit. The first number is the one in that commit's message: wall time on the first 1.5 GB of the file (48M messages), read from disk. The second is the full day, re-timed afterwards at every commit with one method: `scripts/retime_history.sh` builds the commit in a scratch worktree, replays the day three times with the file in the page cache, and takes user CPU from `/usr/bin/time` (`results/retime.txt`, medians of three; the runs agree to within 1%, except the first run of `096b370`, which was 5% slower).
 
 | commit | change | ns per message, 1.5 GB slice, wall | full day, user CPU |
 |---|---|---|---|
-| `096b370` | `std::map` per side, `std::list` per level, `std::unordered_map` for ids | 285 | not redone yet |
-| `cde3aa3` | orders in a pool, intrusive doubly linked queue per level | 257 | not redone yet |
-| `1f69eb8` | open-addressing hash table for ids | ~130 | not redone yet |
-| `09ee4e0` | price levels in a sorted vector with the best price at the back | 77 | not redone yet |
-| `b744639` | prefetch the id table a few messages ahead | ~60 | not redone yet |
-| `6624666` | queue by id (for correctness, not speed) | not timed | 66 |
+| `096b370` | `std::map` per side, `std::list` per level, `std::unordered_map` for ids | 285 | 264 |
+| `cde3aa3` | orders in a pool, intrusive doubly linked queue per level | 257 | 213 |
+| `1f69eb8` | open-addressing hash table for ids | ~130 | 112 |
+| `09ee4e0` | price levels in a sorted vector with the best price at the back | 77 | 74 |
+| `b744639` | prefetch the id table a few messages ahead | ~60 | 57 |
+| `6624666` | queue by id (for correctness, not speed) | not timed | 58 |
 
-On the slice that is 285 down to ~60, about 4.7x. The two columns are measured differently, so a ratio across them would mean nothing.
+On the full day that is 264 down to 58 ns, about 4.6x. The slice column is a different measurement (wall time, cold file) and only good for comparing rows within it.
 
 What mattered, in order:
 
@@ -67,15 +67,15 @@ Things I tried that did not help:
 
 ## The engine
 
-`bench/engine_bench.cpp` runs the engine on synthetic flow for a single book, since a market data feed never exercises matching. The times are per operation, as Google Benchmark reports them on the M4:
+`bench/engine_bench.cpp` runs the engine on synthetic flow for a single book, since a market data feed never exercises matching. The times are per operation, the mean of five repetitions on the M4 (`results/engine_bench.json`):
 
 | benchmark | per operation |
 |---|---|
-| mixed flow, 1M operations: 48% passive limits, 38% cancels, 5% reduces, 7% IOC, 2% market | 19.5 ns |
-| add an order behind the best price, then cancel it | 16 ns (31 ns per pair) |
-| an IOC that clears three levels, then the three levels refilled | 35 ns (140 ns per round) |
+| mixed flow, 1M operations: 48% passive limits, 38% cancels, 5% reduces, 7% IOC, 2% market | 20.3 ns |
+| add an order behind the best price, then cancel it | 16 ns (32 ns per pair) |
+| an IOC that clears three levels, then the three levels refilled | 36 ns (143 ns per round) |
 
-Not much of the mixed flow is matching. Every passive limit sits one to ten ticks behind a fixed mid on its own side, so none of them ever crosses; only the 9% that are IOC or market orders trade. The cancels and reduces name one of the last 2,000 or 50 ids handed out, and many of those have already gone or were IOC or market orders that never rested, so 44% of the cancels and 17% of the reduces are rejected after one failed lookup in the id table. `bench/flow_mix.cpp` runs the same flow once without timing it and counts all of this (`bench/flow_mix.txt`). So the 19.5 ns is an average over operations that mostly rest an order, cancel or shrink one, or get rejected; fewer than one in ten matches.
+Not much of the mixed flow is matching. Every passive limit sits one to ten ticks behind a fixed mid on its own side, so none of them ever crosses; only the 9% that are IOC or market orders trade. The cancels and reduces name one of the last 2,000 or 50 ids handed out, and many of those have already gone or were IOC or market orders that never rested, so 44% of the cancels and 17% of the reduces are rejected after one failed lookup in the id table. `bench/flow_mix.cpp` runs the same flow once without timing it and counts all of this (`bench/flow_mix.txt`). So the 20.3 ns is an average over operations that mostly rest an order, cancel or shrink one, or get rejected; fewer than one in ten matches.
 
 ## Testing
 
