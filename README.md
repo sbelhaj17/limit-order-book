@@ -6,7 +6,7 @@ There are two halves. `Market` keeps the books: orders, price levels, queues. `E
 
 ## Results on a real day
 
-NASDAQ publishes a few sample days of ITCH. I used 30 December 2019 (`scripts/get_itch.sh` fetches it). The numbers below are from `results/replay_b7426a5.txt`, the replay's own output, and `results/retime.txt`.
+NASDAQ publishes a few sample days of ITCH. I used 30 December 2019 (`scripts/get_itch.sh` fetches it). The numbers below are from `results/replay_b7426a5.txt`, the replay's own output, `results/retime.txt` and, for the parse-only row, `results/parse_only.txt`.
 
 | | |
 |---|---|
@@ -23,9 +23,9 @@ The last row is the check I trust most. An exchange matches in price-time priori
 
 It covers order-executed (`E`) messages only, not every execution in the feed. An order executed at a price other than the one it was displayed at comes as a `C` message, which the replay applies to the book but does not check, and trades against hidden orders (`P`) never touch the book at all.
 
-Times are user CPU time, which leaves out the kernel's time paging the file in. The wall clock is less useful here: the unpacked file is 8.3 GB, and with a browser open my laptop could not keep it all in the page cache, so a replay spent as long waiting on the disk as it did running (16.5 s wall with the file cached, 33 s once it no longer fit, in commit `de7916a`). My first full-day runs, on 30 September, gave 17.6 s of user CPU. The 15.5 s above is the median of three runs on 3 October with the same replay code and the machine otherwise idle; I don't know what made the earlier runs slower.
+Times are user CPU time, which leaves out the kernel's time paging the file in. The wall clock is less useful here: the unpacked file is 8.3 GB, and with a browser open my laptop could not keep it all in the page cache, so a replay spent as long waiting on the disk as it did running (17 s wall with the file cached, 33 s once it no longer fit, per the `de7916a` commit message). My first full-day runs, on 30 September, gave 17.6 s of user CPU. The 15.5 s above is the median of three runs in the re-timing on the night of 3 to 4 October (`results/retime.txt`), with the same replay code and the machine otherwise idle; I don't know what made the earlier runs slower.
 
-The parse-only figure is about a tenth of the 51 ns per message in the commit that added the tool (`096b370`). That one was wall time on the first 1.5 GB of the file, so it included waiting for pages of the mapped file, and a parse that does almost nothing per message is the run where that matters most. With the file in the page cache the whole day parses in 1.47 s of user CPU and 2.26 s of wall time (`results/parse_only.txt`), so even the wall clock comes to about 8 ns per message, and the 51 ns was most likely the disk.
+The parse-only figure is about a tenth of the 51 ns per message in the commit that added the tool (`096b370`). That one was wall time on the first 1.5 GB of the file, so it included waiting for pages of the mapped file, and a parse that does almost nothing per message is the run where that matters most. With the file in the page cache the whole day parses in 1.47 s of user CPU and 2.26 s of wall time (`results/parse_only.txt`), so even the wall clock comes to about 8 ns per message. The 51 ns came from the first run on the slice, while the full file was still downloading, and I don't know what slowed it.
 
 ## The 0.2% that didn't match
 
@@ -39,7 +39,7 @@ That 100% is weaker evidence than it looks. I found the rule by looking at this 
 
 ## How it got faster
 
-Each row is a commit. The first number is the one in that commit's message: wall time on the first 1.5 GB of the file (48M messages), read from disk. The second is the full day, re-timed afterwards at every commit with one method: `scripts/retime_history.sh` builds the commit in a scratch worktree, replays the day three times with the file in the page cache, and takes user CPU from `/usr/bin/time` (`results/retime.txt`, medians of three; the runs agree to within 1%, except the first run of `096b370`, which was 5% slower).
+Each row is a commit. The first number is the one in that commit's message: wall time on the first 1.5 GB of the file (48M messages), run two or three times back to back; I didn't record whether the file was in the page cache. The second is the full day, re-timed afterwards at every commit with one method: `scripts/retime_history.sh` builds the commit in a scratch worktree, replays the day three times with the file in the page cache, and takes user CPU from `/usr/bin/time` (`results/retime.txt`, medians of three; the runs agree to within 1%, except the first run of `096b370`, which was 5% slower).
 
 | commit | change | ns per message, 1.5 GB slice, wall | full day, user CPU |
 |---|---|---|---|
@@ -50,12 +50,12 @@ Each row is a commit. The first number is the one in that commit's message: wall
 | `b744639` | prefetch the id table a few messages ahead | ~60 | 57 |
 | `6624666` | queue by id (for correctness, not speed) | not timed | 58 |
 
-On the full day that is 264 down to 58 ns, about 4.6x. The slice column is a different measurement (wall time, cold file) and only good for comparing rows within it.
+On the full day that is 264 down to 58 ns, about 4.6x. The slice column is a different measurement (wall time on a slice, cache state not recorded) and only good for comparing rows within it.
 
 What mattered, in order:
 
 - **The id table.** Almost every message looks up an order by id, and `std::unordered_map` chases a pointer per lookup. Linear probing over one flat array halved the time. Deletion shifts the rest of the run back instead of leaving tombstones, because nearly every order is deleted again within the day.
-- **The price levels.** Each side of a book is a `std::vector` of (key, level) sorted so the best price is at the back. New orders mostly arrive at or near the best price, so finding the level is a short walk from the back and inserting a new level barely moves anything. Ask prices are stored bit-flipped so that a better price is a larger key on both sides, and the code never branches on the side.
+- **The price levels.** Each side of a book is a `std::vector` of (key, level) sorted so the best price is at the back. New orders mostly arrive at or near the best price, so finding the level is a short walk from the back and inserting a new level barely moves anything. Ask prices are stored bit-flipped so that a better price is a larger key on both sides; once the key is computed, the level code never branches on the side.
 - **Prefetching.** The id table is 64 MB, far bigger than cache, so every lookup was a cache miss the CPU sat waiting for. `itch::parse` can run a second cursor a few messages ahead and hand each upcoming id to the handler, which prefetches that slot.
 
 Things I tried that did not help:
