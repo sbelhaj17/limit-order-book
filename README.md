@@ -13,15 +13,17 @@ NASDAQ publishes a few sample days of ITCH. I used 30 December 2019 (`scripts/ge
 | messages | 268,744,780 |
 | instruments | 8,906 |
 | peak resting orders | 1,924,078 |
-| time, on an Apple M4 | 17.6 s of CPU, about 66 ns per message (15 M messages/s) |
-| parsing alone | 1.4 s, about 5 ns per message |
+| time, on an Apple M4 | 17.6 s of user CPU, about 66 ns per message (15 M messages/s) |
+| parsing alone | 1.4 s of user CPU, about 5 ns per message |
 | messages that referred to an order the book did not have | 0 |
 | orders left in the book after the close | 0 |
 | executions that hit the order at the front of the best level | 5,722,824 of 5,722,824 |
 
 The last row is the check I trust most. An exchange matches in price-time priority, so every execution in the feed should hit whichever order my book has first in line at the best price. If any queue were built wrong, whether from a parsing bug, a wrong offset, or a replace handled badly, some executions would land on an order the book thinks is second or third.
 
-Times are user CPU time. The wall clock is less useful here: the unpacked file is 8.3 GB, and with a browser open my laptop could not keep it all in the page cache, so a replay spent as long waiting on the disk as it did running.
+Times are user CPU time (`ru_utime` from `getrusage`), which leaves out the kernel's time paging the file in. The wall clock is less useful here: the unpacked file is 8.3 GB, and with a browser open my laptop could not keep it all in the page cache, so a replay spent as long waiting on the disk as it did running (17 s wall with the file cached, 33 s once it no longer fit).
+
+The parse-only figure is about a tenth of the 51 ns per message in the commit that added the tool (`096b370`). That one was wall time on the first 1.5 GB of the file, so it included waiting for pages of the mapped file, and a parse that does almost nothing per message is the run where that matters most. The parser has only gained work since then (the lookahead cursor), so I put the gap down to how it was measured rather than to the code. I have not re-timed it to check.
 
 ## The 0.2% that didn't match
 
