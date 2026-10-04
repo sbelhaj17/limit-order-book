@@ -58,4 +58,8 @@ if(LOB_BENCH)
 
   add_executable(engine_bench bench/engine_bench.cpp)
   target_link_libraries(engine_bench PRIVATE lob benchmark::benchmark)
+
+  # not a benchmark: counts what the mixed flow does (bench/flow_mix.txt)
+  add_executable(flow_mix bench/flow_mix.cpp)
+  target_link_libraries(flow_mix PRIVATE lob)
 endif()

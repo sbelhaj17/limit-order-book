@@ -1,0 +1,14 @@
+BM_MixedFlow's flow: 1,000,000 operations, seed 42, on a book seeded with 800 orders
+
+operation          count   share    rested    traded     fills           rejected
+passive limit    479,541   48.0%   479,541         0         0           0 (0.0%)
+ioc               70,347    7.0%         0    69,460    94,256           0 (0.0%)
+market            20,181    2.0%         0    20,181    23,885           0 (0.0%)
+cancel           379,522   38.0%         0         0         0    167,917 (44.2%)
+reduce            50,409    5.0%         0         0         0      8,657 (17.2%)
+
+'traded' counts operations that got at least one fill. A cancel or reduce is
+rejected when its id is not resting: it already traded or was cancelled, or it
+was an IOC or market order, which never rests.
+
+resting at the end: 219,132 orders, 20 bid levels, 20 ask levels
