@@ -79,10 +79,10 @@ Not much of the mixed flow is matching. Every passive limit sits one to ten tick
 
 ## Testing
 
-- `tests/reference_market.hpp` is the first version of the book, `std::map` and `std::list`, slow but short enough to be obviously right. Every unit test runs against both it and the real book.
+- `tests/reference_market.hpp` is the first version of the book, `std::map` and `std::list`, slow but short enough to be obviously right. The `Market` unit tests are typed tests that run against both it and the real book. The engine, id table and ITCH unit tests do not use it.
 - `tests/reference_engine.hpp` is a second matching engine written as plainly as I could. The differential tests feed both engines, and both books, the same random order flow and require identical output after every operation: same fills, same book, same queues.
 - The id table is checked against `std::unordered_map` under churn, including a tiny table where runs wrap around the end constantly.
-- CI builds on Linux and macOS and runs everything normally and under AddressSanitizer and UBSan.
+- CI builds on Linux and macOS and runs the unit tests normally and under AddressSanitizer and UBSan. The sanitizer build leaves out the benchmarks; the normal build runs them once as a smoke test. No CI job runs `itch_replay` or touches real ITCH data (the parser tests build their messages byte by byte), so the replay results above come from my machine only.
 
 ## Building
 
