@@ -67,13 +67,15 @@ Things I tried that did not help:
 
 ## The engine
 
-`bench/engine_bench.cpp` runs the engine on synthetic flow, since a market data feed never exercises matching. On the M4:
+`bench/engine_bench.cpp` runs the engine on synthetic flow for a single book, since a market data feed never exercises matching. The times are per operation, as Google Benchmark reports them on the M4:
 
-| benchmark | per order |
+| benchmark | per operation |
 |---|---|
-| mixed flow: 48% passive limits, 38% cancels, 5% reduces, 7% IOC, 2% market | 19.5 ns |
+| mixed flow, 1M operations: 48% passive limits, 38% cancels, 5% reduces, 7% IOC, 2% market | 19.5 ns |
 | add an order behind the best price, then cancel it | 16 ns (31 ns per pair) |
 | an IOC that clears three levels, then the three levels refilled | 35 ns (140 ns per round) |
+
+The mixed flow does less matching than its name suggests. Every passive limit sits one to ten ticks behind a fixed mid on its own side, so none of them ever crosses; only the 9% that are IOC or market orders trade. The cancels and reduces name one of the last 2,000 or 50 ids handed out, and many of those have already gone or were IOC or market orders that never rested, so 44% of the cancels and 17% of the reduces are rejected after one failed lookup in the id table. `bench/flow_mix.cpp` runs the same flow once without timing it and counts all of this (`bench/flow_mix.txt`). So most of the operations behind the 19.5 ns rest an order or take one off the book, and fewer than one in ten matches.
 
 ## Testing
 
